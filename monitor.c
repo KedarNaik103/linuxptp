@@ -21,9 +21,11 @@ struct monitor_message {
 struct monitor {
 	struct port *dst_port;
 	struct slave_rx_sync_timing_data_tlv *sync_tlv;
+	struct slave_rx_sync_computed_data_tlv *computed_tlv;
 	struct slave_delay_timing_data_tlv *delay_tlv;
 	struct monitor_message delay;
 	struct monitor_message sync;
+	struct monitor_message sync_computed;
 };
 
 static bool monitor_active(struct monitor *monitor)
@@ -115,6 +117,24 @@ static int monitor_init_sync(struct monitor *monitor, struct address address)
 	return 0;
 }
 
+static int monitor_init_computed(struct monitor *monitor, struct address address)
+{
+	struct tlv_extra *extra;
+	const size_t tlv_size = sizeof(struct slave_rx_sync_computed_data_tlv) +
+                            sizeof(struct slave_rx_sync_computed_record) *
+                        	RECORDS_PER_MESSAGE;
+	
+	extra = monitor_init_message(&monitor->sync_computed, monitor->dst_port, 
+								 TLV_SLAVE_RX_SYNC_COMPUTED_DATA, tlv_size,
+                                 address);
+	if(!extra){
+		return -1;
+	}
+	monitor->computed_tlv = (struct slave_rx_sync_computed_data_tlv *) extra->tlv;
+
+	return 0;						
+}
+
 struct monitor *monitor_create(struct config *config, struct port *dst)
 {
 	struct monitor *monitor;
@@ -145,6 +165,13 @@ struct monitor *monitor_create(struct config *config, struct port *dst)
 	}
 	if (monitor_init_sync(monitor, address)) {
 		msg_put(monitor->delay.msg);
+		free(monitor);
+		return NULL;
+	}
+
+	if(monitor_init_computed(monitor, address)){
+		msg_put(monitor->delay.msg);
+		msg_put(monitor->sync.msg);
 		free(monitor);
 		return NULL;
 	}
@@ -225,6 +252,39 @@ int monitor_sync(struct monitor *monitor, struct PortIdentity source_pid,
 	monitor->sync.count++;
 	if (monitor->sync.count == monitor->sync.records_per_msg) {
 		monitor->sync.count = 0;
+		return monitor_forward(monitor->dst_port, msg);
+	}
+	return 0;
+}
+
+int monitor_sync_computed(struct monitor *monitor,struct PortIdentity source_pid,
+						  uint16_t seqid, struct currentDS *cds, double nrr)
+{
+	struct slave_rx_sync_computed_record *record;
+	struct ptp_message *msg;
+	
+	if (!monitor_active(monitor)) {
+		return 0;
+	}
+
+	msg = monitor->sync_computed.msg;
+
+	if (!pid_eq(&monitor->computed_tlv->sourcePortIdentity, &source_pid)) {
+		/* There was a change in remote master. Drop stale records. */
+		memcpy(&monitor->computed_tlv->sourcePortIdentity, &source_pid,
+		       sizeof(monitor->computed_tlv->sourcePortIdentity));
+		monitor->sync_computed.count = 0;
+	}
+
+	record = monitor->computed_tlv->record + monitor->sync_computed.count;
+	record->sequenceId = seqid;
+	record->offsetFromMaster = cds->offsetFromMaster;
+	record->meanPathDelay = cds->meanPathDelay;
+	record->scaledNeighborRateRatio = 0;
+
+	monitor->sync_computed.count++;
+	if (monitor->sync_computed.count == monitor->sync_computed.records_per_msg) {
+		monitor->sync_computed.count = 0;
 		return monitor_forward(monitor->dst_port, msg);
 	}
 	return 0;

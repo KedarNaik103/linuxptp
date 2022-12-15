@@ -88,6 +88,20 @@ static void pmc_show_rx_sync_timing(struct slave_rx_sync_timing_record *record,
 		SHOW_TIMESTAMP(record->syncEventIngressTimestamp));
 }
 
+static void pmc_show_rx_sync_computed(struct slave_rx_sync_computed_record *rec,
+					FILE *fp)
+{
+	 fprintf(fp,
+            IFMT "sequenceId                 %hu" 
+            IFMT "offsetFromMaster           %.1f" 
+            IFMT "meanPathDelay              %.1f" 
+            IFMT "scaledNeighborRateRatio    %d",
+            rec->sequenceId,
+            rec->offsetFromMaster / 65536.0,
+            rec->meanPathDelay / 65536.0,
+            rec->scaledNeighborRateRatio);
+}
+
 
 static void pmc_show_unicast_master_entry(struct unicast_master_entry *entry,
 				    FILE *fp)
@@ -112,6 +126,8 @@ static void pmc_show_signaling(struct ptp_message *msg, FILE *fp)
 	struct slave_delay_timing_record *delay_record;
 	struct slave_rx_sync_timing_data_tlv *srstd;
 	struct slave_delay_timing_data_tlv *sdtdt;
+	struct slave_rx_sync_computed_data_tlv *srscd;
+	struct slave_rx_sync_computed_record *computed_record;
 	struct tlv_extra *extra;
 	int i, cnt;
 
@@ -147,6 +163,18 @@ static void pmc_show_signaling(struct ptp_message *msg, FILE *fp)
 				delay_record++;
 			}
 			break;
+		case TLV_SLAVE_RX_SYNC_COMPUTED_DATA:
+			srscd = (struct slave_rx_sync_computed_data_tlv *) extra->tlv;
+			cnt = (srscd->length - sizeof(srscd->sourcePortIdentity)) /
+				sizeof(*computed_record);
+			fprintf(fp, "SLAVE_RX_SYNC_COMPUTED_DATA N %d "
+				IFMT "sourcePortIdentity         %s",
+				cnt, pid2str(&srstd->sourcePortIdentity));	
+			computed_record = srscd->record;
+			for(i = 0; i < cnt; i++){
+				pmc_show_rx_sync_computed(computed_record, fp);
+				computed_record++;
+			}
 		default:
 			break;
 		}

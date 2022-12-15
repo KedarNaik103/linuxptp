@@ -283,6 +283,27 @@ struct slave_rx_sync_timing_data_tlv {
 	  sizeof(struct slave_rx_sync_timing_data_tlv)) /		\
 	 sizeof(struct slave_rx_sync_timing_record))
 
+struct slave_rx_sync_computed_record{
+	UInteger16   sequenceId;
+	TimeInterval offsetFromMaster;
+	TimeInterval meanPathDelay;
+	Integer32   scaledNeighborRateRatio;
+} PACKED;
+
+struct slave_rx_sync_computed_data_tlv{
+	Enumeration16       type;
+	UInteger16          length;
+	struct PortIdentity sourcePortIdentity;
+	UInteger8           computedFlags;
+	UInteger8           reservedArea;
+	struct slave_rx_sync_computed_record record[0];
+} PACKED;
+
+#define SLAVE_RX_SYNC_COMPUTED_MAX                                 \
+	((sizeof(struct message_data) - sizeof(struct signaling_msg) - \
+	  sizeof(struct slave_rx_sync_computed_data_tlv)) /            \
+	 sizeof(struct slave_rx_sync_computed_record))
+
 typedef struct Integer96 {
 	uint16_t nanoseconds_msb;
 	uint64_t nanoseconds_lsb;

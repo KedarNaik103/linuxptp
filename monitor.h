@@ -22,4 +22,7 @@ void monitor_destroy(struct monitor *monitor);
 int monitor_sync(struct monitor *monitor, struct PortIdentity source_pid,
 		 uint16_t seqid, tmv_t t1, tmv_t corr, tmv_t t2);
 
+int monitor_sync_computed(struct monitor *monitor, struct PortIdentity source_pid,
+						  uint16_t seqid, struct currentDS *cds, double nrr);
+
 #endif

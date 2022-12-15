@@ -1303,6 +1303,7 @@ static void port_synchronize(struct port *p,
 	c1 = correction_to_tmv(correction1);
 	c2 = correction_to_tmv(correction2);
 	t1c = tmv_add(t1, tmv_add(c1, c2));
+	struct currentDS *cds = clock_current_dataset(p->clock);
 
 	switch (p->state) {
 	case PS_UNCALIBRATED:
@@ -1310,6 +1311,9 @@ static void port_synchronize(struct port *p,
 		monitor_sync(p->slave_event_monitor,
 			     clock_parent_identity(p->clock), seqid,
 			     t1, tmv_add(c1, c2), t2);
+		monitor_sync_computed(p->slave_event_monitor, 
+							  clock_parent_identity(p->clock), seqid, cds, 
+							  p->nrate.ratio);
 		break;
 	default:
 		break;
