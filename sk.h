@@ -20,6 +20,7 @@
 #ifndef HAVE_SK_H
 #define HAVE_SK_H
 
+#include <stdbool.h>
 #include "address.h"
 #include "transport.h"
 
@@ -50,6 +51,18 @@ struct sk_ts_info {
 };
 
 /**
+ * Contains interface information returned by the GLINKSETTINGS ioctl.
+ * @valid:            set to non-zero when the info struct contains valid data.
+ * @speed:            interface speed.
+ * @iface_bit_period  interface bit period in attoseconds per bit.
+ */
+struct sk_if_info {
+	bool valid;
+	uint32_t speed;
+	uint64_t iface_bit_period;
+};
+
+/**
  * Obtains a socket suitable for use with sk_interface_index().
  * @return  An open socket on success, -1 otherwise.
  */
@@ -77,6 +90,14 @@ int sk_general_init(int fd);
  * @return          zero on success, negative on failure.
  */
 int sk_get_ts_info(const char *name, struct sk_ts_info *sk_info);
+
+/**
+ * Obtain supporte interface information
+ * @param name     The name of the interface
+ * @param info      Struct containing obtained interface information.
+ * @return          zero on success, negative on failure.
+ */
+int sk_get_if_info(const char *name, struct sk_if_info *sk_info);
 
 /**
  * Obtain the MAC address of a network interface.

@@ -1,4 +1,4 @@
-.TH PHC2SYS 8 "January 2021" "linuxptp"
+.TH PHC2SYS 8 "February 2023" "linuxptp"
 .SH NAME
 phc2sys \- synchronize two or more clocks
 
@@ -125,8 +125,8 @@ option. This option may be given up to 128 times.
 .BI \-E " servo"
 Specify which clock servo should be used. Valid values are pi for a PI
 controller, linreg for an adaptive controller using linear regression, and
-ntpshm for the NTP SHM reference clock to allow another process to synchronize
-the local clock.
+ntpshm and refclock_sock for the NTP SHM and chrony SOCK reference clocks
+respectively to allow another process to synchronize the local clock.
 The default is pi.
 .TP
 .BI \-P " kp"
@@ -263,10 +263,36 @@ sets the program options. This is the only used option.
 .SH FILE OPTIONS
 
 .TP
+.B clock_servo
+The servo which is used to synchronize the local clock. Valid values
+are "pi" for a PI controller, "linreg" for an adaptive controller using
+linear regression, "ntpshm" for the NTP SHM reference clock to allow
+another process to synchronize the local clock (the SHM segment number
+is set to the domain number), and "nullf" for a servo that always dials
+frequency offset zero (for use in SyncE nodes). The default is "pi."
+Same as option
+.B \-E
+(see above).
+
+.TP
 .B domainNumber
 Specify the domain number used by phc2sys. The default is 0. Same as option
 .B \-n
 (see above).
+
+.TP
+.B first_step_threshold
+Specify the step threshold applied only on the first update. It is the
+maximum offset that is corrected by adjusting clock. It's specified in
+seconds. The value of 0.0 disables stepping on start. The default is
+0.00002 (20 microseconds).
+Same as option
+.B \-F
+(see above).
+
+.TP
+.B free-running
+Don't adjust the sink clock if enabled. The default is 0 (disabled).
 
 .TP
 .B kernel_leap
@@ -277,11 +303,6 @@ correct the one-second offset slowly by changing the clock frequency
 stepping). Relevant only with software time stamping. The default is 1
 (enabled). Same as option
 .B \-x
-(see above).
-
-The maximum logging level of messages which should be printed.
-The default is 6 (LOG_INFO). Same as option
-.B \-l
 (see above).
 
 .TP
@@ -301,6 +322,32 @@ Same as option
 (see above).
 
 .TP
+.B ntpshm_segment
+The number of the SHM segment used by ntpshm servo.  The default is 0.
+Same as option
+.B \-M
+(see above).
+
+.TP
+.B pi_integral_const
+Specifies the integral constant of the PI controller.
+Same as option
+.B \-I
+(see above).
+
+.TP
+.B pi_proportional_const
+Specifies the proportional constant of the PI controller.
+Same as option
+.B \-P
+(see above).
+
+.TP
+.B refclock_sock_address
+The address of the UNIX domain socket to be used by the refclock_sock servo.
+The default is /var/run/refclock.ptp.sock.
+
+.TP
 .B sanity_freq_limit
 The maximum allowed frequency offset between uncorrected clock and the
 system monotonic clock in parts per billion (ppb). This is used as a
@@ -312,25 +359,29 @@ Same as option
 (see above).
 
 .TP
-.B clock_servo
-The servo which is used to synchronize the local clock. Valid values
-are "pi" for a PI controller, "linreg" for an adaptive controller using
-linear regression, "ntpshm" for the NTP SHM reference clock to allow
-another process to synchronize the local clock (the SHM segment number
-is set to the domain number), and "nullf" for a servo that always dials
-frequency offset zero (for use in SyncE nodes). The default is "pi."
+.B step_threshold
+Specifies the step threshold of the servo. It is the maximum offset that the
+servo corrects by changing the clock frequency (phase when using nullf servo)
+instead of stepping the clock. The clock is stepped on start regardless of the
+option if the offset is larger than 20 microseconds (unless the -F option is
+used). It's specified in seconds. The value of 0.0 disables stepping after the
+start. The default is 0.0.
 Same as option
-.B \-E
+.B \-S
 (see above).
-
-.TP
-.B free-running
-Don't adjust the sink clock if enabled. The default is 0 (disabled).
 
 .TP
 .B transportSpecific
 The transport specific field. Must be in the range 0 to 255.
 The default is 0.
+
+.TP
+.B uds_address
+Specifies the address of the server's UNIX domain socket. The default
+is /var/run/ptp4
+Same as option
+.B \-z
+(see above).
 
 .TP
 .B use_syslog
@@ -344,57 +395,6 @@ Related to option
 Print messages to the standard output if enabled.  The default is 0 (disabled).
 Related to option
 .B \-m
-(see above).
-
-.TP
-.B pi_proportional_const
-Specifies the proportional constant of the PI controller.
-Same as option
-.B \-P
-(see above).
-
-.TP
-.B pi_integral_const
-Specifies the integral constant of the PI controller.
-Same as option
-.B \-I
-(see above).
-
-.TP
-.B step_threshold
-Specifies the step threshold of the servo. It is the maximum offset that
-the servo corrects by changing the clock frequency instead of stepping
-the clock. The clock is stepped on start regardless of the option if the
-offset is larger than 20 microseconds (unless the -F option is used).
-It's  specified  in seconds. The value of 0.0 disables stepping after
-the start. The default is 0.0.
-Same as option
-.B \-S
-(see above).
-
-.TP
-.B first_step_threshold
-Specify the step threshold applied only on the first update. It is the
-maximum offset that is corrected by adjusting clock. It's specified in
-seconds. The value of 0.0 disables stepping on start. The default is
-0.00002 (20 microseconds).
-Same as option
-.B \-F
-(see above).
-
-.TP
-.B ntpshm_segment
-The number of the SHM segment used by ntpshm servo.  The default is 0.
-Same as option
-.B \-M
-(see above).
-
-.TP
-.B uds_address
-Specifies the address of the server's UNIX domain socket. The default
-is /var/run/ptp4
-Same as option
-.B \-z
 (see above).
 
 .SH TIME SCALE USAGE

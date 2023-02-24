@@ -29,8 +29,6 @@
 struct ts2phc_nmea_pps_source {
 	struct ts2phc_pps_source pps_source;
 	struct config *config;
-	const char *leapfile;
-	time_t lsfile_mtime;
 	struct lstab *lstab;
 	pthread_t worker;
 	/* Protects anonymous struct fields, below, from concurrent access. */
@@ -144,34 +142,6 @@ static void *monitor_nmea_status(void *arg)
 	return NULL;
 }
 
-static int update_leapsecond_table(struct ts2phc_nmea_pps_source *s)
-{
-	struct stat statbuf;
-	int err;
-
-	if (!s->leapfile) {
-		return 0;
-	}
-	err = stat(s->leapfile, &statbuf);
-	if (err) {
-		pr_err("nmea: file status failed on %s: %m", s->leapfile);
-		return -1;
-	}
-	if (s->lsfile_mtime == statbuf.st_mtim.tv_sec) {
-		return 0;
-	}
-	pr_info("nmea: updating leap seconds file");
-	if (s->lstab) {
-		lstab_destroy(s->lstab);
-	}
-	s->lstab = lstab_create(s->leapfile);
-	if (!s->lstab) {
-		return -1;
-	}
-	s->lsfile_mtime = statbuf.st_mtim.tv_sec;
-	return 0;
-}
-
 static void ts2phc_nmea_pps_source_destroy(struct ts2phc_pps_source *src)
 {
 	struct ts2phc_nmea_pps_source *s =
@@ -188,7 +158,7 @@ static int ts2phc_nmea_pps_source_getppstime(struct ts2phc_pps_source *src,
 	struct ts2phc_nmea_pps_source *m =
 		container_of(src, struct ts2phc_nmea_pps_source, pps_source);
 	tmv_t delay_t1, delay_t2, duration_since_rmc, local_t1, local_t2, rmc;
-	int lstab_error = 0, tai_offset = 0;
+	int lstab_error = -1, tai_offset = 0;
 	enum lstab_result result;
 	struct timespec now;
 	int64_t utc_time;
@@ -225,11 +195,6 @@ static int ts2phc_nmea_pps_source_getppstime(struct ts2phc_pps_source *src,
 	utc_time /= (int64_t) 1000000000;
 	*ts = tmv_to_timespec(rmc);
 
-	if (update_leapsecond_table(m)) {
-		pr_err("nmea: failed to update leap seconds table");
-		return -1;
-	}
-
 	result = lstab_utc2tai(m->lstab, utc_time, &tai_offset);
 	switch (result) {
 	case LSTAB_OK:
@@ -237,11 +202,12 @@ static int ts2phc_nmea_pps_source_getppstime(struct ts2phc_pps_source *src,
 		break;
 	case LSTAB_UNKNOWN:
 		pr_err("nmea: unable to find utc time in leap second table");
-		lstab_error = -1;
+		break;
+	case LSTAB_EXPIRED:
+		pr_err("nmea: utc time is past leap second table expiry date");
 		break;
 	case LSTAB_AMBIGUOUS:
 		pr_err("nmea: utc time stamp is ambiguous");
-		lstab_error = -1;
 		break;
 	}
 	ts->tv_sec += tai_offset;
@@ -253,28 +219,20 @@ struct ts2phc_pps_source *ts2phc_nmea_pps_source_create(struct ts2phc_private *p
 							const char *dev)
 {
 	struct ts2phc_nmea_pps_source *s;
-	struct stat statbuf;
+	const char* leapfile;
 	int err;
 
 	s = calloc(1, sizeof(*s));
 	if (!s) {
 		return NULL;
 	}
-	s->leapfile = config_get_string(priv->cfg, NULL, "leapfile");
-	s->lstab = lstab_create(s->leapfile);
+	leapfile = config_get_string(priv->cfg, NULL, "leapfile");
+	s->lstab = lstab_create(leapfile);
 	if (!s->lstab) {
 		free(s);
 		return NULL;
 	}
-	if (s->leapfile) {
-		err = stat(s->leapfile, &statbuf);
-		if (err) {
-			lstab_destroy(s->lstab);
-			free(s);
-			return NULL;
-		}
-		s->lsfile_mtime = statbuf.st_mtim.tv_sec;
-	}
+
 	s->pps_source.destroy = ts2phc_nmea_pps_source_destroy;
 	s->pps_source.getppstime = ts2phc_nmea_pps_source_getppstime;
 	s->config = priv->cfg;

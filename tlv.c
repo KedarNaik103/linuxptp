@@ -35,6 +35,7 @@
 	(tlv->length < sizeof(struct type) - sizeof(struct TLV))
 
 uint8_t ieee8021_id[3] = { IEEE_802_1_COMMITTEE };
+uint8_t itu_t_id[3] = { ITU_T_COMMITTEE };
 
 static TAILQ_HEAD(tlv_pool, tlv_extra) tlv_pool =
 	TAILQ_HEAD_INITIALIZER(tlv_pool);
@@ -680,6 +681,7 @@ static void nsm_resp_pre_send(struct tlv_extra *extra)
 static int org_post_recv(struct organization_tlv *org)
 {
 	struct follow_up_info_tlv *f;
+	struct msg_interface_rate_tlv *m;
 
 	if (0 == memcmp(org->id, ieee8021_id, sizeof(ieee8021_id))) {
 		if (org->subtype[0] || org->subtype[1]) {
@@ -700,6 +702,21 @@ static int org_post_recv(struct organization_tlv *org)
 			if (org->length + sizeof(struct TLV) != sizeof(struct msg_interval_req_tlv))
 				goto bad_length;
 		}
+	} else if (0 == memcmp(org->id, itu_t_id, sizeof(itu_t_id))) {
+		if (org->subtype[0] || org->subtype[1]) {
+			return 0;
+		}
+		switch (org->subtype[2]) {
+		case 2:
+			if (org->length + sizeof(struct TLV) != sizeof(struct msg_interface_rate_tlv))
+				goto bad_length;
+			m = (struct msg_interface_rate_tlv *)org;
+			m->interfaceBitPeriod = net2host64(m->interfaceBitPeriod);
+			m->numberOfBitsBeforeTimestamp = ntohs(m->numberOfBitsBeforeTimestamp);
+			m->numberOfBitsAfterTimestamp = ntohs(m->numberOfBitsAfterTimestamp);
+			break;
+		}
+
 	}
 	return 0;
 bad_length:
@@ -709,6 +726,7 @@ bad_length:
 static void org_pre_send(struct organization_tlv *org)
 {
 	struct follow_up_info_tlv *f;
+	struct msg_interface_rate_tlv *m;
 
 	if (0 == memcmp(org->id, ieee8021_id, sizeof(ieee8021_id))) {
 		if (org->subtype[0] || org->subtype[1]) {
@@ -721,6 +739,18 @@ static void org_pre_send(struct organization_tlv *org)
 			f->gmTimeBaseIndicator = htons(f->gmTimeBaseIndicator);
 			scaled_ns_h2n(&f->lastGmPhaseChange);
 			f->scaledLastGmPhaseChange = htonl(f->scaledLastGmPhaseChange);
+			break;
+		}
+	} else if (0 == memcmp(org->id, itu_t_id, sizeof(itu_t_id))) {
+		if (org->subtype[0] || org->subtype[1]) {
+			return;
+		}
+		switch (org->subtype[2]) {
+		case 2:
+			m = (struct msg_interface_rate_tlv *)org;
+			m->interfaceBitPeriod = host2net64(m->interfaceBitPeriod);
+			m->numberOfBitsBeforeTimestamp = htons(m->numberOfBitsBeforeTimestamp);
+			m->numberOfBitsAfterTimestamp = htons(m->numberOfBitsAfterTimestamp);
 			break;
 		}
 	}

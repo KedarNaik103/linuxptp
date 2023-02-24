@@ -177,7 +177,7 @@ static void port_cancel_unicast(struct port *p)
 
 	STAILQ_FOREACH(ucma, &p->unicast_master_table->addrs, list) {
 		if (ucma) {
-			unicast_client_tx_cancel(p, ucma);
+			unicast_client_tx_cancel(p, ucma, UNICAST_CANCEL_ALL);
 		}
 	}
 }
@@ -194,7 +194,7 @@ static int port_unicast_message_valid(struct port *p, struct ptp_message *m)
 		pr_warning("%s: new foreign master %s not in unicast master table",
 			   p->log_name, pid2str(&m->header.sourcePortIdentity));
 
-		if (unicast_client_tx_cancel(p, &master)) {
+		if (unicast_client_tx_cancel(p, &master, (1 << msg_type(m)))) {
 			pr_warning("%s: cancel unicast transmission to %s failed",
 				   p->log_name, pid2str(&m->header.sourcePortIdentity));
 		}
@@ -1231,7 +1231,7 @@ int port_set_qualification_tmo(struct port *p)
 		       1+clock_steps_removed(p->clock), p->logAnnounceInterval);
 }
 
-static int port_set_sync_rx_tmo(struct port *p)
+int port_set_sync_rx_tmo(struct port *p)
 {
 	return set_tmo_log(p->fda.fd[FD_SYNC_RX_TIMER],
 			   p->syncReceiptTimeout, p->logSyncInterval);
@@ -1858,6 +1858,7 @@ int port_initialize(struct port *p)
 	p->neighborPropDelayThresh = config_get_int(cfg, p->name, "neighborPropDelayThresh");
 	p->min_neighbor_prop_delay = config_get_int(cfg, p->name, "min_neighbor_prop_delay");
 	p->delay_response_timeout  = config_get_int(cfg, p->name, "delay_response_timeout");
+	p->iface_rate_tlv 	   = config_get_int(cfg, p->name, "interface_rate_tlv");
 
 	if (config_get_int(cfg, p->name, "asCapable") == AS_CAPABLE_TRUE) {
 		p->asCapable = ALWAYS_CAPABLE;
@@ -2745,6 +2746,11 @@ void port_link_status(void *ctx, int linkup, int ts_index)
 		p->link_status = link_state;
 	} else {
 		p->link_status = link_state | LINK_STATE_CHANGED;
+		/* Update Interface speed information on Link up*/
+		if (linkup) {
+			interface_get_ifinfo(p->iface);
+		}
+
 		pr_notice("%s: link %s", p->log_name, linkup ? "up" : "down");
 	}
 
@@ -3449,13 +3455,13 @@ int port_state_update(struct port *p, enum fsm_event event, int mdiff)
 	}
 
 	if (mdiff) {
-		unicast_client_state_changed(p);
+		p->unicast_state_dirty = true;
 	}
 	if (next != p->state) {
 		port_show_transition(p, next, event);
 		p->state = next;
 		port_notify_event(p, NOTIFY_PORT_STATE);
-		unicast_client_state_changed(p);
+		p->unicast_state_dirty = true;
 		return 1;
 	}
 
@@ -3465,4 +3471,12 @@ int port_state_update(struct port *p, enum fsm_event event, int mdiff)
 enum bmca_select port_bmca(struct port *p)
 {
 	return p->bmca;
+}
+
+void port_update_unicast_state(struct port *p)
+{
+	if (p->unicast_state_dirty) {
+		unicast_client_state_changed(p);
+		p->unicast_state_dirty = false;
+	}
 }

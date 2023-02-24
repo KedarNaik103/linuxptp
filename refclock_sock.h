@@ -1,7 +1,6 @@
 /**
- * @file ether.h
- * @brief Provides definitions useful when working with Ethernet packets.
- * @note Copyright (C) 2012 Richard Cochran <richardcochran@gmail.com>
+ * @file refclock_sock.h
+ * @note Copyright (C) 2023 Miroslav Lichvar <mlichvar@redhat.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,35 +16,11 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#ifndef HAVE_ETHER_H
-#define HAVE_ETHER_H
+#ifndef HAVE_REFCLOCK_SOCK_H
+#define HAVE_REFCLOCK_SOCK_H
 
-#include <stdint.h>
+#include "servo.h"
 
-#define EUI48 6
-#define EUI64 8
-
-#define MAC_LEN  EUI48
-#define GUID_LEN EUI64
-
-#define GUID_OFFSET 36
-
-typedef uint8_t eth_addr[MAC_LEN];
-
-struct eth_hdr {
-	eth_addr dst;
-	eth_addr src;
-	uint16_t type;
-} __attribute__((packed));
-
-#define VLAN_HLEN 4
-
-struct vlan_hdr {
-	eth_addr dst;
-	eth_addr src;
-	uint16_t tpid;
-	uint16_t tci;
-	uint16_t type;
-} __attribute__((packed));
+struct servo *refclock_sock_servo_create(struct config *cfg);
 
 #endif

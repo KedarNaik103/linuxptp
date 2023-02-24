@@ -454,6 +454,12 @@ void unicast_client_grant(struct port *p, struct ptp_message *m,
 		}
 		return;
 	}
+	if (abs(g->logInterMessagePeriod) > 30) {
+		pr_warning("%s: ignore bogus unicast message interval 2^%d",
+			   p->log_name, g->logInterMessagePeriod);
+		return;
+	}
+
 	pr_debug("%s: unicast %s granted for %u sec",
 		 p->log_name, msg_type_string(mtype), g->durationField);
 
@@ -502,6 +508,7 @@ void unicast_client_grant(struct port *p, struct ptp_message *m,
 			}
 			unicast_client_set_renewal(p, ucma, g->durationField);
 			clock_sync_interval(p->clock, g->logInterMessagePeriod);
+			port_set_sync_rx_tmo(p);
 			break;
 		}
 		break;
@@ -527,6 +534,7 @@ void unicast_client_state_changed(struct port *p)
 {
 	struct unicast_master_address *ucma;
 	struct PortIdentity pid;
+	enum unicast_state prev_state;
 
 	if (!unicast_client_enabled(p)) {
 		return;
@@ -537,7 +545,13 @@ void unicast_client_state_changed(struct port *p)
 		if (pid_eq(&ucma->portIdentity, &pid)) {
 			ucma->state = unicast_fsm(ucma->state, UC_EV_SELECTED);
 		} else {
+			prev_state = ucma->state;
+
 			ucma->state = unicast_fsm(ucma->state, UC_EV_UNSELECTED);
+
+			if ((prev_state != ucma->state) && (prev_state == UC_HAVE_SYDY)) {
+				unicast_client_tx_cancel(p, ucma, UNICAST_CANCEL_SYDY);
+			}
 		}
 	}
 }
@@ -592,28 +606,39 @@ int unicast_client_msg_is_from_master_table_entry(struct port *p, struct ptp_mes
 }
 
 int unicast_client_tx_cancel(struct port *p,
-			     struct unicast_master_address *dst)
+			     struct unicast_master_address *dst,
+			     unsigned int bitmask)
 {
 	struct ptp_message *msg;
 	int err;
 
+	if (!(dst->granted & bitmask)) {
+		return 0;
+	}
 	msg = port_signaling_uc_construct(p, &dst->address, &dst->portIdentity);
 	if (!msg) {
 		return -1;
 	}
-	err = attach_cancel(msg, ANNOUNCE);
-	if (err) {
-		goto out;
+	if (dst->granted & (bitmask & (1 << ANNOUNCE))) {
+		err = attach_cancel(msg, ANNOUNCE);
+		if (err) {
+			goto out;
+		}
+		dst->granted &= ~(1 << ANNOUNCE);
 	}
-	err = attach_cancel(msg, SYNC);
-	if (err) {
-		goto out;
+	if (dst->granted & (bitmask & (1 << SYNC))) {
+		err = attach_cancel(msg, SYNC);
+		if (err) {
+			goto out;
+		}
+		dst->granted &= ~(1 << SYNC);
 	}
-	if (p->delayMechanism != DM_P2P) {
+	if (dst->granted & (bitmask & (1 << DELAY_RESP))) {
 		err = attach_cancel(msg, DELAY_RESP);
 		if (err) {
 			goto out;
 		}
+		dst->granted &= ~(1 << DELAY_RESP);
 	}
 
 	err = port_prepare_and_send(p, msg, TRANS_GENERAL);

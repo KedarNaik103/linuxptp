@@ -658,8 +658,9 @@ static char **get_ptp4l_command(struct program_config *config,
 	return command;
 }
 
-static char **get_phc2sys_command(struct program_config *config, int domain,
-				  int poll, int shm_segment, char *uds_path,
+static char **get_phc2sys_command(struct program_config *config,
+				  struct timemaster_config *tconfig, int domain,
+				  int poll, int refclock_id, char *uds_path,
 				  char *message_tag)
 {
 	char **command = (char **)parray_new();
@@ -673,8 +674,25 @@ static char **get_phc2sys_command(struct program_config *config, int domain,
 		      xstrdup("-z"), xstrdup(uds_path),
 		      xstrdup("-t"), xstrdup(message_tag),
 		      xstrdup("-n"), string_newf("%d", domain),
-		      xstrdup("-E"), xstrdup("ntpshm"),
-		      xstrdup("-M"), string_newf("%d", shm_segment), NULL);
+		      xstrdup("-E"), NULL);
+
+	switch (tconfig->ntp_program) {
+	case CHRONYD:
+		parray_extend((void ***)&command,
+			      xstrdup("refclock_sock"),
+			      xstrdup("--refclock_sock_address"),
+			      string_newf("%s/chrony.SOCK%d",
+					  tconfig->rundir, refclock_id),
+			      NULL);
+		break;
+	case NTPD:
+		parray_extend((void ***)&command,
+			      xstrdup("ntpshm"), xstrdup("-M"),
+			      string_newf("%d", refclock_id +
+					  tconfig->first_shm_segment),
+			      NULL);
+		break;
+	}
 
 	return command;
 }
@@ -702,19 +720,24 @@ static void add_command(char **command, int command_group,
 	parray_append((void ***)&script->command_groups, group);
 }
 
-static void add_shm_source(int shm_segment, int poll, int dpoll, double delay,
-			   char *ntp_options, char *prefix,
-			   struct timemaster_config *config, char **ntp_config)
+static void add_refclock_source(int refclock_id, int poll, int phc_poll,
+				double delay, char *ntp_options, char *prefix,
+				struct timemaster_config *config,
+				char **ntp_config)
 {
-	char *refid = get_refid(prefix, shm_segment);
+	int filter, shm_segment = refclock_id + config->first_shm_segment;
+	char *refid = get_refid(prefix, refclock_id);
 
 	switch (config->ntp_program) {
 	case CHRONYD:
+		/* set filter to the expected number of samples per poll */
+		filter = (poll >= phc_poll) ? 1 << (poll - phc_poll) : 1;
 		string_appendf(ntp_config,
-			       "refclock SHM %d poll %d dpoll %d "
-			       "refid %s precision 1.0e-9 delay %.1e %s\n",
-			       shm_segment, poll, dpoll, refid, delay,
-			       ntp_options);
+			       "refclock SOCK %s/chrony.SOCK%d poll %d "
+			       "filter %d refid %s precision 1.0e-9 "
+			       "delay %.1e %s\n",
+			       config->rundir, refclock_id, poll,
+			       filter, refid, delay, ntp_options);
 		break;
 	case NTPD:
 		string_appendf(ntp_config,
@@ -758,7 +781,7 @@ static int add_vclock(struct script *script, int pclock_index)
 }
 
 static int add_ptp_source(struct ptp_domain *source,
-			  struct timemaster_config *config, int *shm_segment,
+			  struct timemaster_config *config, int *refclock_id,
 			  int *command_group, int ***allocated_phcs,
 			  char **ntp_config, struct script *script)
 {
@@ -867,9 +890,9 @@ static int add_ptp_source(struct ptp_domain *source,
 		}
 
 		uds_path = string_newf("%s/ptp4l.%d.socket",
-				       config->rundir, *shm_segment);
+				       config->rundir, *refclock_id);
 		uds_path2 = string_newf("%s/ptp4lro.%d.socket",
-					config->rundir, *shm_segment);
+					config->rundir, *refclock_id);
 
 		message_tag = string_newf("[%d", source->domain);
 		for (j = 0; interfaces[j]; j++)
@@ -879,7 +902,7 @@ static int add_ptp_source(struct ptp_domain *source,
 
 		config_file = xmalloc(sizeof(*config_file));
 		config_file->path = string_newf("%s/ptp4l.%d.conf",
-						config->rundir, *shm_segment);
+						config->rundir, *refclock_id);
 
 		config_file->content = xstrdup("[global]\n");
 		if (*config->ptp4l.settings) {
@@ -905,10 +928,10 @@ static int add_ptp_source(struct ptp_domain *source,
 						    vclock_index, 1);
 			add_command(command, *command_group, script);
 
-			command = get_phc2sys_command(&config->phc2sys,
+			command = get_phc2sys_command(&config->phc2sys, config,
 						      source->domain,
 						      source->phc2sys_poll,
-						      *shm_segment, uds_path,
+						      *refclock_id, uds_path,
 						      message_tag);
 			add_command(command, (*command_group)++, script);
 		} else {
@@ -917,18 +940,32 @@ static int add_ptp_source(struct ptp_domain *source,
 						    interfaces, NULL, 0);
 			add_command(command, (*command_group)++, script);
 
-			string_appendf(&config_file->content,
-				       "clock_servo ntpshm\n"
-				       "ntpshm_segment %d\n", *shm_segment);
+			switch (config->ntp_program) {
+			case CHRONYD:
+				string_appendf(&config_file->content,
+					       "clock_servo refclock_sock\n"
+					       "refclock_sock_address "
+					       "%s/chrony.SOCK%d\n",
+					       config->rundir, *refclock_id);
+				break;
+			case NTPD:
+				string_appendf(&config_file->content,
+					       "clock_servo ntpshm\n"
+					       "ntpshm_segment %d\n",
+					       *refclock_id +
+					       config->first_shm_segment);
+				break;
+			}
 		}
 
 		parray_append((void ***)&script->configs, config_file);
 
-		add_shm_source(*shm_segment, source->ntp_poll,
-			       source->phc2sys_poll, source->delay,
-			       source->ntp_options, "PTP", config, ntp_config);
+		add_refclock_source(*refclock_id, source->ntp_poll,
+				    source->phc2sys_poll, source->delay,
+				    source->ntp_options, "PTP", config,
+				    ntp_config);
 
-		(*shm_segment)++;
+		(*refclock_id)++;
 
 		free(message_tag);
 		free(uds_path);
@@ -1037,7 +1074,7 @@ static struct script *script_create(struct timemaster_config *config)
 	struct source *source, **sources;
 	struct config_file *ntp_config = NULL;
 	int **allocated_phcs = (int **)parray_new();
-	int ret = 0, shm_segment, command_group = 0;
+	int ret = 0, refclock_id = 0, command_group = 0;
 
 	script->vclocks = (struct phc_vclocks **)parray_new();
 	script->configs = (struct config_file **)parray_new();
@@ -1047,7 +1084,6 @@ static struct script *script_create(struct timemaster_config *config)
 	script->restart_groups = config->restart_processes;
 
 	ntp_config = add_ntp_program(config, script, command_group++);
-	shm_segment = config->first_shm_segment;
 
 	for (sources = config->sources; (source = *sources); sources++) {
 		switch (source->type) {
@@ -1056,7 +1092,7 @@ static struct script *script_create(struct timemaster_config *config)
 				ret = 1;
 			break;
 		case PTP_DOMAIN:
-			if (add_ptp_source(&source->ptp, config, &shm_segment,
+			if (add_ptp_source(&source->ptp, config, &refclock_id,
 					   &command_group, &allocated_phcs,
 					   &ntp_config->content, script))
 				ret = 1;
